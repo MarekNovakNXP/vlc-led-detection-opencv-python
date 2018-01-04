@@ -4,7 +4,7 @@ import time
 import video
 import os
 import random
-from math import sin, cos, pi
+from math import sin, cos, pi, sqrt
 import matplotlib.pyplot as plt
 import random
 
@@ -26,6 +26,7 @@ class TransmitterDetector(object):
             self.inventory.append((random.randint(1,width), random.randint(1,height)))
         self.weightHistory = []
         self.likelyhoodHistory = []
+        self.errorEvolution = []
 
     def rejectOutliers(self, data, m=10):
         mean = np.mean(data)
@@ -266,6 +267,14 @@ class TransmitterTracker(object):
         likelyhoodSum = 0
         detectorsNumber = 0
         detectorIndex = 0
+        unmergedCoordinates = []
+        initialTransient = 400
+        plotPeriod = 2000
+
+        plotNow = False
+        if self.tick > initialTransient: # skip the initial settling
+            if self.tick % plotPeriod == 0:
+                plotNow = True
 
         if drawMarkers:
             copyFrame = frame.copy()
@@ -276,6 +285,7 @@ class TransmitterTracker(object):
 
             #execute the detector
             detector.coordinates = detector.run(frame)
+            unmergedCoordinates.append(detector.coordinates)
 
             std = np.std(detector.xArr)+np.std(detector.yArr)
             #std = np.std(np.diff(detector.xArr, n=2))+np.std(np.diff(detector.yArr, n=2))
@@ -294,23 +304,23 @@ class TransmitterTracker(object):
             detector.std = std
             detector.likelyhood = likelyhood
 
-        if self.tick % 200 == 0:
+        if plotNow == True:
             plt.figure(1)
 
         colors = ['r', 'g', 'b', 'k']
         for detector in self.detectors:
             weight = detector.likelyhood/likelyhoodSum
-            if self.tick > 200:
+            if self.tick > initialTransient:  # skip the initial settling
                 detector.weightHistory.append(weight)
                 detector.likelyhoodHistory.append(detector.likelyhood)
             xFusion += weight*detector.coordinates[0]
             yFusion += weight*detector.coordinates[1]
 
-            if self.tick % 200 == 0:
+            if plotNow == True:
                 plt.plot(detector.likelyhoodHistory, colors[detectorIndex], label=detector.label)
             detectorIndex += 1
 
-        if self.tick % 200 == 0:
+        if plotNow == True:
             plt.legend(loc='upper center', shadow=True)
             plt.ylabel('Likelihood P')
             plt.xlabel('Frame number')
@@ -319,10 +329,12 @@ class TransmitterTracker(object):
             plt.show()
         self.tick += 1
 
-        return (int(xFusion), int(yFusion), copyFrame)
+        return (int(xFusion), int(yFusion), copyFrame, unmergedCoordinates)
 
 
 def simulation(noiseLevel = 0.1, onvalue = 255, offvalue = 0, hue=0, lim = 9999):
+    mergedErrorEvolution = []
+
     tracker = TransmitterTracker()
     tracker.addDetector(TemporalMaximumDetector(markerColor=RED))
     tracker.addDetector(ColorDetector(markerColor=GREEN))
@@ -331,11 +343,12 @@ def simulation(noiseLevel = 0.1, onvalue = 255, offvalue = 0, hue=0, lim = 9999)
     counter = 0
     noise = np.zeros((480,640, 3), np.uint8)
     step = 0
-    x = 0
-    y = 0
+    gx = 0
+    gy = 0
     h = 2
     s = 255
     v = 255
+
     while counter < lim:
         start = cv2.getTickCount()
         
@@ -345,8 +358,8 @@ def simulation(noiseLevel = 0.1, onvalue = 255, offvalue = 0, hue=0, lim = 9999)
         #generate test image
         frame = np.zeros((480,640, 3), np.uint8)
 
-        x = 300+step*int(100*sin(2*pi*(counter%1000)/1000))
-        y = 300+step*int(100*sin(2*pi*((counter/2)%1000)/1000))
+        gx = 300+step*int(100*sin(2*pi*(counter%1000)/1000))
+        gy = 300+step*int(100*sin(2*pi*((counter/2)%1000)/1000))
         s = 255
 
         if counter % 2 == 0:
@@ -359,25 +372,31 @@ def simulation(noiseLevel = 0.1, onvalue = 255, offvalue = 0, hue=0, lim = 9999)
         hsv  = np.uint8([[[h,s,v]]])
         bgr = cv2.cvtColor(hsv,cv2.COLOR_HSV2BGR)
         color = (int(bgr[0][0][0]), int(bgr[0][0][1]), int(bgr[0][0][2]))
-        cv2.circle(frame, (x, y), 3, color, 6) 
+        cv2.circle(frame, (gx, gy), 3, color, 6) 
 
         v = 255
         h = 20
         for i in range(0):
-            x += 10*i
-            y += 5*i
+            gx += 10*i
+            gy += 5*i
             h += 5*i
             hsv  = np.uint8([[[h,s,v]]])
             bgr = cv2.cvtColor(hsv,cv2.COLOR_HSV2BGR)
             color = (int(bgr[0][0][0]), int(bgr[0][0][1]), int(bgr[0][0][2]))
-            cv2.circle(frame, (x, y), 4, color, 6) 
+            cv2.circle(frame, (gx, gy), 4, color, 6) 
 
 
 
         #add noise and generated frame
         frame = cv2.add(frame, noise)
 
-        (x,y,processedFrame) = tracker.getCoordinateFusion(frame, True, True)
+        (mx,my,processedFrame, unmergedCoordinates) = tracker.getCoordinateFusion(frame, True, True)
+
+        
+        tracker.detectors[0].errorEvolution.append(sqrt((unmergedCoordinates[0][0]-gx)**2+(unmergedCoordinates[0][1]-gy)**2))
+        tracker.detectors[1].errorEvolution.append(sqrt((unmergedCoordinates[1][0]-gx)**2+(unmergedCoordinates[1][1]-gy)**2))
+        tracker.detectors[2].errorEvolution.append(sqrt((unmergedCoordinates[2][0]-gx)**2+(unmergedCoordinates[2][1]-gy)**2))
+        mergedErrorEvolution.append(sqrt((mx-gx)**2+(my-gy)**2))
 
         stop = cv2.getTickCount()
         elapsed = (stop - start) / cv2.getTickFrequency()
@@ -389,6 +408,12 @@ def simulation(noiseLevel = 0.1, onvalue = 255, offvalue = 0, hue=0, lim = 9999)
         #noiseLevel = counter/2000.0
         print counter
 
+    plt.figure(1)
+    plt.plot(tracker.detectors[0].errorEvolution, 'r', label="Temporal Maximum Detector")
+    plt.plot(tracker.detectors[1].errorEvolution, 'g', label="Color Detector")
+    plt.plot(tracker.detectors[2].errorEvolution, 'b', label="Temporal Shape Detector")
+    plt.plot(mergedErrorEvolution, 'k', label="Merged Detector")
+    plt.show()
     cv2.destroyAllWindows()
 
 def webcameraTest():
@@ -416,8 +441,8 @@ def webcameraTest():
     cv2.destroyAllWindows()
 
 
-simulation(lim=401)
-simulation(hue=50, lim=401)
-simulation(noiseLevel=0.5, onvalue=128, offvalue=(128+25), lim=401)
+simulation(lim=1000)
+simulation(hue=50, lim=1000)
+simulation(noiseLevel=0.5, onvalue=128, offvalue=(128+25), lim=1000)
 #webcameraTest()
 
