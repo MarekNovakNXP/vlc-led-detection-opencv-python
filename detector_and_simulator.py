@@ -173,7 +173,7 @@ class ColorDetector(TransmitterDetector):
                                    # canny edge detector parameters, experimentally
                                    param1=250, param2=5,
                                    # minimum and maximum radii of circles
-                                   minRadius=2, maxRadius=self.width/64)
+                                   minRadius=2, maxRadius=self.width//64)
 
         if not (circles is None):
             for coord in circles[0,:]:
@@ -187,7 +187,7 @@ class ColorDetector(TransmitterDetector):
 class TemporalShapeDetector(TransmitterDetector):
 
     def __init__(self, width=640, height=480,
-                Q = 0.8,
+                Q = 0.97,
                 CLOSING_SIZE = 10, OPENING_SIZE=6,
                 markerColor = (0,0,255)):
         super(self.__class__, self).__init__(width, height, markerColor)
@@ -220,7 +220,6 @@ class TemporalShapeDetector(TransmitterDetector):
         #multiply by quotient for exponential filtration
         self.differenceAccumulator = np.uint8(self.differenceAccumulator*self.Q)
 
-
         # removes noise from image
         kernel = np.ones((self.OPENING_SIZE, self.OPENING_SIZE), np.uint8)
         opened = cv2.morphologyEx(self.differenceAccumulator, cv2.MORPH_OPEN, kernel)
@@ -241,7 +240,7 @@ class TemporalShapeDetector(TransmitterDetector):
                                    # canny edge detector parameters, experimentally
                                    param1=250, param2=6,
                                    # minimum and maximum radii of circles
-                                   minRadius=2, maxRadius=self.width/64)
+                                   minRadius=2, maxRadius=self.width//64)
 
         if not (circles is None):
             for coord in circles[0,:]:
@@ -268,8 +267,8 @@ class TransmitterTracker(object):
         detectorsNumber = 0
         detectorIndex = 0
         unmergedCoordinates = []
-        initialTransient = 400
-        plotPeriod = 2000
+        initialTransient = 200 #400
+        plotPeriod = 200 #2000
 
         plotNow = False
         if self.tick > initialTransient: # skip the initial settling
@@ -321,7 +320,7 @@ class TransmitterTracker(object):
             detectorIndex += 1
 
         if plotNow == True:
-            plt.legend(loc='upper center', shadow=True)
+            plt.legend(loc='upper center', framealpha=0.75, facecolor='white')
             plt.ylabel('Likelihood P')
             plt.xlabel('Frame number')
             axes = plt.gca()
@@ -406,13 +405,16 @@ def simulation(noiseLevel = 0.1, onvalue = 255, offvalue = 0, hue=0, lim = 9999)
         cv2.waitKey(1)
 
         #noiseLevel = counter/2000.0
-        print counter
+        print (counter)
 
     plt.figure(1)
     plt.plot(tracker.detectors[0].errorEvolution, 'r', label="Temporal Maximum Detector")
     plt.plot(tracker.detectors[1].errorEvolution, 'g', label="Color Detector")
     plt.plot(tracker.detectors[2].errorEvolution, 'b', label="Temporal Shape Detector")
-    plt.plot(mergedErrorEvolution, 'k', label="Merged Detector")
+    plt.plot(mergedErrorEvolution, 'k', label="New Proposed Detector")
+    plt.legend(loc='upper center', framealpha=0.75, facecolor='white')
+    plt.ylabel('Error')
+    plt.xlabel('Frame number')
     plt.show()
     cv2.destroyAllWindows()
 
@@ -428,7 +430,7 @@ def webcameraTest():
         start = cv2.getTickCount()
         _, frame = cap.read()
 
-        (x,y,processedFrame) = tracker.getCoordinateFusion(frame, True, True)
+        (x,y,processedFrame, unmergedCoordinates) = tracker.getCoordinateFusion(frame, True, True)
 
         stop = cv2.getTickCount()
         elapsed = (stop - start) / cv2.getTickFrequency()
@@ -441,8 +443,8 @@ def webcameraTest():
     cv2.destroyAllWindows()
 
 
-simulation(lim=1000)
-simulation(hue=50, lim=1000)
-simulation(noiseLevel=0.5, onvalue=128, offvalue=(128+25), lim=1000)
+simulation(lim=400)
+simulation(hue=50, lim=400)
+simulation(noiseLevel=0.5, onvalue=128, offvalue=(128+25), lim=400)
 #webcameraTest()
 
